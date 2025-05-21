@@ -1,10 +1,8 @@
 package com.flairlabs.workflow.services.schema_mangement_service.service;
 
-import com.flairlabs.workflow.services.schema_mangement_service.models.DynamicChangelog;
+import com.flairlabs.workflow.services.schema_mangement_service.config.TenantContext;
 import com.flairlabs.workflow.services.schema_mangement_service.models.EntityDefinition;
 import com.flairlabs.workflow.services.schema_mangement_service.models.FieldDefinition;
-import com.flairlabs.workflow.services.schema_mangement_service.repository.DynamicChangelogRepository;
-import jakarta.annotation.PostConstruct;
 import liquibase.Contexts;
 import liquibase.LabelExpression;
 import liquibase.Liquibase;
@@ -30,10 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.sql.DataSource;
 
 import java.io.ByteArrayOutputStream;
-import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
-import java.sql.SQLException;
 
 @Service
 @RequiredArgsConstructor
@@ -41,27 +37,21 @@ import java.sql.SQLException;
 public class SchemaService {
 
     private final DataSource dataSource;
-    private final DynamicChangelogRepository changelogRepository;
 
-    private Database database;
-
-    @PostConstruct
-    public void init() {
-        try (Connection connection = dataSource.getConnection()) {
-            database = DatabaseFactory.getInstance()
-                    .findCorrectDatabaseImplementation(new JdbcConnection(connection));
-        } catch (SQLException | LiquibaseException e) {
-            log.error("Failed to initialize Liquibase database connection", e);
-            throw new RuntimeException("Failed to initialize schema service", e);
-        }
+    private Database getDatabase(Connection connection) throws LiquibaseException {
+        String schemaName = TenantContext.getTenantIdentifier();
+        Database database = DatabaseFactory.getInstance()
+                .findCorrectDatabaseImplementation(new JdbcConnection(connection));
+        database.setDefaultSchemaName(schemaName);
+        return database;
     }
+
+
 
     @Transactional
     public void createEntityTable(EntityDefinition entity) {
         try (Connection connection = dataSource.getConnection()) {
-            // System.out.println("data"+database);
-            Database database = DatabaseFactory.getInstance()
-                    .findCorrectDatabaseImplementation(new JdbcConnection(connection));
+            Database database = getDatabase(connection);
             // Create dynamic changelog
             DatabaseChangeLog changeLog = new DatabaseChangeLog("in-memory-changelog-" + entity.getName());
             changeLog.setChangeLogParameters(new ChangeLogParameters(database));
@@ -69,6 +59,7 @@ public class SchemaService {
             // Create changeset
             CreateTableChange createTableChange = new CreateTableChange();
             createTableChange.setTableName(entity.getName().toLowerCase());
+            createTableChange.setSchemaName(TenantContext.getTenantIdentifier());
 
             // Add primary key column
             ColumnConfig idColumn = new ColumnConfig();
@@ -112,13 +103,13 @@ public class SchemaService {
             liquibase.update(new Contexts(), new LabelExpression());
 
             // Log the changes
-            DynamicChangelog changelog = DynamicChangelog.builder()
-                    .changeType(DynamicChangelog.ChangeType.CREATE_ENTITY)
-                    .entityName(entity.getName())
-                    .appliedBy("system")
-                    .changeDetails("Created entity table: " + entity.getName())
-                    .build();
-            changelogRepository.save(changelog);
+//            DynamicChangelog changelog = DynamicChangelog.builder()
+//                    .changeType(DynamicChangelog.ChangeType.CREATE_ENTITY)
+//                    .entityName(entity.getName())
+//                    .appliedBy("system")
+//                    .changeDetails("Created entity table: " + entity.getName())
+//                    .build();
+            //changelogRepository.save(changelog);
 
             log.info("Created new entity table: {}", entity.getName());
         } catch (Exception e) {
@@ -131,12 +122,14 @@ public class SchemaService {
     public void addFieldToEntity(EntityDefinition entity, FieldDefinition field) {
         try (Connection connection = dataSource.getConnection()) {
             // Create dynamic changelog
+            Database database = getDatabase(connection);
             DatabaseChangeLog changeLog = new DatabaseChangeLog();
             changeLog.setChangeLogParameters(new ChangeLogParameters(database));
 
             // Create changeset
             AddColumnChange addColumnChange = new AddColumnChange();
             addColumnChange.setTableName(entity.getName().toLowerCase());
+            addColumnChange.setSchemaName(TenantContext.getTenantIdentifier());
 
             AddColumnConfig column = createColumnFromField(field);
             addColumnChange.addColumn(column);
@@ -153,15 +146,15 @@ public class SchemaService {
             liquibase.update(new Contexts(), new LabelExpression());
 
             // Log the changes
-            DynamicChangelog changelog = DynamicChangelog.builder()
-                    .changeType(DynamicChangelog.ChangeType.ADD_FIELD)
-                    .entityName(entity.getName())
-                    .fieldName(field.getName())
-                    .fieldType(field.getFieldType().name())
-                    .appliedBy("system")
-                    .changeDetails("Added field: " + field.getName() + " to entity: " + entity.getName())
-                    .build();
-            changelogRepository.save(changelog);
+//            DynamicChangelog changelog = DynamicChangelog.builder()
+//                    .changeType(DynamicChangelog.ChangeType.ADD_FIELD)
+//                    .entityName(entity.getName())
+//                    .fieldName(field.getName())
+//                    .fieldType(field.getFieldType().name())
+//                    .appliedBy("system")
+//                    .changeDetails("Added field: " + field.getName() + " to entity: " + entity.getName())
+//                    .build();
+            //changelogRepository.save(changelog); // filter
 
             log.info("Added new field: {} to entity: {}", field.getName(), entity.getName());
         } catch (Exception e) {
@@ -174,6 +167,7 @@ public class SchemaService {
     public void modifyFieldInEntity(EntityDefinition entity, FieldDefinition oldField, FieldDefinition newField) {
         try (Connection connection = dataSource.getConnection()) {
             // Create dynamic changelog
+            Database database = getDatabase(connection);
             DatabaseChangeLog changeLog = new DatabaseChangeLog();
             changeLog.setChangeLogParameters(new ChangeLogParameters(database));
 
@@ -235,15 +229,15 @@ public class SchemaService {
             liquibase.update(new Contexts(), new LabelExpression());
 
             // Log the changes
-            DynamicChangelog changelog = DynamicChangelog.builder()
-                    .changeType(DynamicChangelog.ChangeType.MODIFY_FIELD)
-                    .entityName(entity.getName())
-                    .fieldName(newField.getName())
-                    .fieldType(newField.getFieldType().name())
-                    .appliedBy("system")
-                    .changeDetails("Modified field: " + oldField.getName() + " to " + newField.getName() + " in entity: " + entity.getName())
-                    .build();
-            changelogRepository.save(changelog);
+//            DynamicChangelog changelog = DynamicChangelog.builder()
+//                    .changeType(DynamicChangelog.ChangeType.MODIFY_FIELD)
+//                    .entityName(entity.getName())
+//                    .fieldName(newField.getName())
+//                    .fieldType(newField.getFieldType().name())
+//                    .appliedBy("system")
+//                    .changeDetails("Modified field: " + oldField.getName() + " to " + newField.getName() + " in entity: " + entity.getName())
+//                    .build();
+            //changelogRepository.save(changelog);
 
             log.info("Modified field: {} to {} in entity: {}", oldField.getName(), newField.getName(), entity.getName());
         } catch (Exception e) {
@@ -256,6 +250,7 @@ public class SchemaService {
     public void dropFieldFromEntity(EntityDefinition entity, FieldDefinition field) {
         try (Connection connection = dataSource.getConnection()) {
             // Create dynamic changelog
+            Database database = getDatabase(connection);
             DatabaseChangeLog changeLog = new DatabaseChangeLog();
             changeLog.setChangeLogParameters(new ChangeLogParameters(database));
 
@@ -276,15 +271,15 @@ public class SchemaService {
             liquibase.update(new Contexts(), new LabelExpression());
 
             // Log the changes
-            DynamicChangelog changelog = DynamicChangelog.builder()
-                    .changeType(DynamicChangelog.ChangeType.DROP_FIELD)
-                    .entityName(entity.getName())
-                    .fieldName(field.getName())
-                    .fieldType(field.getFieldType().name())
-                    .appliedBy("system")
-                    .changeDetails("Dropped field: " + field.getName() + " from entity: " + entity.getName())
-                    .build();
-            changelogRepository.save(changelog);
+//            DynamicChangelog changelog = DynamicChangelog.builder()
+//                    .changeType(DynamicChangelog.ChangeType.DROP_FIELD)
+//                    .entityName(entity.getName())
+//                    .fieldName(field.getName())
+//                    .fieldType(field.getFieldType().name())
+//                    .appliedBy("system")
+//                    .changeDetails("Dropped field: " + field.getName() + " from entity: " + entity.getName())
+//                    .build();
+            //changelogRepository.save(changelog);
 
             log.info("Dropped field: {} from entity: {}", field.getName(), entity.getName());
         } catch (Exception e) {
@@ -297,6 +292,7 @@ public class SchemaService {
     public void dropEntityTable(EntityDefinition entity) {
         try (Connection connection = dataSource.getConnection()) {
             // Create dynamic changelog
+            Database database = getDatabase(connection);
             DatabaseChangeLog changeLog = new DatabaseChangeLog();
             changeLog.setChangeLogParameters(new ChangeLogParameters(database));
 
@@ -316,13 +312,13 @@ public class SchemaService {
             liquibase.update(new Contexts(), new LabelExpression());
 
             // Log the changes
-            DynamicChangelog changelog = DynamicChangelog.builder()
-                    .changeType(DynamicChangelog.ChangeType.DROP_ENTITY)
-                    .entityName(entity.getName())
-                    .appliedBy("system")
-                    .changeDetails("Dropped entity table: " + entity.getName())
-                    .build();
-            changelogRepository.save(changelog);
+//            DynamicChangelog changelog = DynamicChangelog.builder()
+//                    .changeType(DynamicChangelog.ChangeType.DROP_ENTITY)
+//                    .entityName(entity.getName())
+//                    .appliedBy("system")
+//                    .changeDetails("Dropped entity table: " + entity.getName())
+//                    .build();
+            //changelogRepository.save(changelog);
 
             log.info("Dropped entity table: {}", entity.getName());
         } catch (Exception e) {
@@ -352,32 +348,26 @@ public class SchemaService {
 
     // Helper method to map field types to SQL types
     private String mapFieldTypeToSqlType(FieldDefinition.FieldType fieldType, Integer maxLength) {
-        switch (fieldType) {
-            case TEXT:
+        return switch (fieldType) {
+            case TEXT -> {
                 if (maxLength != null && maxLength > 0) {
-                    return "VARCHAR(" + Math.min(maxLength, 4000) + ")";
+                    yield "VARCHAR(" + Math.min(maxLength, 4000) + ")";
                 }
-                return "VARCHAR(255)";
-            case NUMBER:
-                return "INTEGER";
-            case DECIMAL:
-                return "DECIMAL(19, 2)";
-            case BOOLEAN:
-                return "BOOLEAN";
-            case DATE:
-                return "DATE";
-            case DATETIME:
-                return "TIMESTAMP";
-            case EMAIL:
-            case URL:
-            case PHONE:
+                yield "VARCHAR(255)";
+            }
+            case NUMBER -> "INTEGER";
+            case DECIMAL -> "DECIMAL(19, 2)";
+            case BOOLEAN -> "BOOLEAN";
+            case DATE -> "DATE";
+            case DATETIME -> "TIMESTAMP";
+            case EMAIL, URL, PHONE -> {
                 if (maxLength != null && maxLength > 0) {
-                    return "VARCHAR(" + Math.min(maxLength, 255) + ")";
+                    yield "VARCHAR(" + Math.min(maxLength, 255) + ")";
                 }
-                return "VARCHAR(100)";
-            default:
-                return "VARCHAR(255)";
-        }
+                yield "VARCHAR(100)";
+            }
+            default -> "VARCHAR(255)";
+        };
     }
 
     // Helper method to serialize changelog to XML
@@ -386,7 +376,7 @@ public class SchemaService {
         XMLChangeLogSerializer serializer = new XMLChangeLogSerializer();
         try {
             serializer.write(changeLog.getChangeSets(), outputStream);
-            return outputStream.toString(StandardCharsets.UTF_8.name());
+            return outputStream.toString(StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.error("Failed to serialize changelog", e);
             return "Failed to serialize changelog: " + e.getMessage();
